@@ -1,0 +1,12 @@
+.env
+data/*.db
+data/*.db-journal
+logs/
+faka-gateway
+faka-gateway.exe
+*.log
+.DS_Store
+.air/
+
+dist/
+*.exe~

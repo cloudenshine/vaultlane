@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>码仓 · AI 账号批发对接网关</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231F3A5F'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-family='serif' font-size='36' fill='%23FAFAF7'%3E码%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/">
+        <span class="brand-mark">码</span>
+        <span class="brand-name">码仓 · MASTORE</span>
+        <span class="brand-tag">AI 账号批发对接网关</span>
+      </a>
+      <div class="topbar-search">
+        <input id="search-input" type="text" placeholder="搜索商品：示例A / 示例B / 示例C…" />
+        <button id="search-btn" aria-label="搜索">搜索</button>
+      </div>
+      <nav class="topbar-nav">
+        <a href="#/" class="nav-link active" data-route="home">逛商品</a>
+        <a href="#/orders" class="nav-link" data-route="orders">查订单</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- 由 JS 渲染 -->
+    <div class="loading">加载中…</div>
+  </main>
+
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-mask"></div>
+    <div class="drawer-panel" id="drawer-panel"></div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- v2.0.1 二次确认弹窗（恢复被误删的 openConfirm 流程） -->
+  <div id="confirm-modal" class="modal" hidden>
+    <div class="modal-mask"></div>
+    <div class="modal-panel">
+      <h3 id="confirm-title" class="modal-title">确认操作</h3>
+      <p id="confirm-msg" class="modal-msg">是否继续？</p>
+      <div class="modal-actions">
+        <button id="confirm-cancel" class="btn">取消</button>
+        <button id="confirm-ok" class="btn btn-primary">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div>码仓 · FakaGateway v1.0 · 对接 upstreama.com (上游发卡 v3.4.9)</div>
+    <div class="footer-sub">仅供合法合规使用 · 本服务为对接网关，商品/库存/价格以源站为准</div>
+  </footer>
+
+  <script src="/static/app.js?v=20260616-2"></script>
+</body>
+</html>
