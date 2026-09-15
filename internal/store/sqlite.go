@@ -33,13 +33,19 @@ type Order struct {
 	UserID        int64     `json:"user_id"`
 	PaymentID     int64     `json:"payment_id"`
 	PayMethod     string    `json:"pay_method"`
+	CouponID      int64     `json:"coupon_id"`
+	Discount      float64   `json:"discount"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // Store 订单存储
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	Cipher interface {
+		Encrypt(string) (string, error)
+		Decrypt(string) (string, error)
+	}
 }
 
 // NewSQLite 创建 SQLite 存储
@@ -56,6 +62,9 @@ func NewSQLite(path string) (*Store, error) {
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
+
+	// 启用 WAL 模式与繁忙重试等待，大幅提升并发读写吞吐，防锁库
+	_, _ = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;`)
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
@@ -97,7 +106,56 @@ func (s *Store) migrate() error {
 		return err
 	}
 	// v3.0 增量迁移：用户 / 支付 / 配置
-	return s.migrateV3()
+	if err := s.migrateV3(); err != nil {
+		return err
+	}
+	// v5.0 增量迁移：优惠券 / 分销返佣 / 订单折扣
+	return s.migrateV5()
+}
+
+func (s *Store) migrateV5() error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS coupons (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			code TEXT UNIQUE NOT NULL,
+			name TEXT NOT NULL DEFAULT '',
+			type INTEGER NOT NULL DEFAULT 0,
+			discount REAL NOT NULL DEFAULT 0,
+			min_amount REAL NOT NULL DEFAULT 0,
+			total_limit INTEGER NOT NULL DEFAULT 0,
+			used_count INTEGER NOT NULL DEFAULT 0,
+			status INTEGER NOT NULL DEFAULT 1,
+			expire_at DATETIME,
+			created_at DATETIME NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_coupons_code ON coupons(code)`,
+		`CREATE TABLE IF NOT EXISTS coupon_usages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			coupon_id INTEGER NOT NULL,
+			user_id INTEGER NOT NULL,
+			order_id INTEGER NOT NULL,
+			discount REAL NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_coupon_usages_uid ON coupon_usages(user_id, coupon_id)`,
+	}
+	for _, q := range stmts {
+		if _, err := s.db.Exec(q); err != nil {
+			return err
+		}
+	}
+	// 扩展列（试执行，忽略已存在错误）
+	alterStmts := []string{
+		`ALTER TABLE users ADD COLUMN invite_code TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN referrer_id INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE users ADD COLUMN commission_balance REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE orders ADD COLUMN coupon_id INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE orders ADD COLUMN discount REAL NOT NULL DEFAULT 0`,
+	}
+	for _, q := range alterStmts {
+		_, _ = s.db.Exec(q)
+	}
+	return nil
 }
 
 func (s *Store) migrateV3() error {
@@ -275,12 +333,12 @@ func (s *Store) CreateOrder(o *Order) error {
 	res, err := s.db.Exec(`
 		INSERT INTO orders (trade_no, request_no, commodity_id, commodity_name, shared_code,
 			contact, num, race, password, amount, status, pay_status, contents,
-			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, coupon_id, discount, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	`,
 		o.TradeNo, o.RequestNo, o.CommodityID, o.CommodityName, o.SharedCode,
 		o.Contact, o.Num, o.Race, o.Password, o.Amount, o.Status, o.PayStatus, o.Contents,
-		o.UpstreamCode, o.UpstreamMsg, o.Source, o.CategoryID, o.UserID, o.PaymentID, o.PayMethod, o.CreatedAt, o.UpdatedAt,
+		o.UpstreamCode, o.UpstreamMsg, o.Source, o.CategoryID, o.UserID, o.PaymentID, o.PayMethod, o.CouponID, o.Discount, o.CreatedAt, o.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert order: %w", err)
@@ -310,14 +368,14 @@ func (s *Store) GetOrderByID(id int64) (*Order, error) {
 	row := s.db.QueryRow(`
 		SELECT id, trade_no, request_no, commodity_id, commodity_name, shared_code,
 			contact, num, race, password, amount, status, pay_status, contents,
-			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, created_at, updated_at
+			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, coupon_id, discount, created_at, updated_at
 		FROM orders WHERE id = ?
 	`, id)
 	var o Order
 	err := row.Scan(&o.ID, &o.TradeNo, &o.RequestNo, &o.CommodityID, &o.CommodityName, &o.SharedCode,
 		&o.Contact, &o.Num, &o.Race, &o.Password, &o.Amount, &o.Status, &o.PayStatus, &o.Contents,
 		&o.UpstreamCode, &o.UpstreamMsg, &o.Source, &o.CategoryID, &o.UserID, &o.PaymentID, &o.PayMethod,
-		&o.CreatedAt, &o.UpdatedAt)
+		&o.CouponID, &o.Discount, &o.CreatedAt, &o.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -332,14 +390,14 @@ func (s *Store) GetOrderByTradeNo(tradeNo string) (*Order, error) {
 	row := s.db.QueryRow(`
 		SELECT id, trade_no, request_no, commodity_id, commodity_name, shared_code,
 			contact, num, race, password, amount, status, pay_status, contents,
-			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, created_at, updated_at
+			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, coupon_id, discount, created_at, updated_at
 		FROM orders WHERE trade_no = ?
 	`, tradeNo)
 	var o Order
 	err := row.Scan(&o.ID, &o.TradeNo, &o.RequestNo, &o.CommodityID, &o.CommodityName, &o.SharedCode,
 		&o.Contact, &o.Num, &o.Race, &o.Password, &o.Amount, &o.Status, &o.PayStatus, &o.Contents,
 		&o.UpstreamCode, &o.UpstreamMsg, &o.Source, &o.CategoryID, &o.UserID, &o.PaymentID, &o.PayMethod,
-		&o.CreatedAt, &o.UpdatedAt)
+		&o.CouponID, &o.Discount, &o.CreatedAt, &o.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -357,7 +415,7 @@ func (s *Store) ListOrders(limit int) ([]Order, error) {
 	rows, err := s.db.Query(`
 		SELECT id, trade_no, request_no, commodity_id, commodity_name, shared_code,
 			contact, num, race, password, amount, status, pay_status, contents,
-			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, created_at, updated_at
+			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, coupon_id, discount, created_at, updated_at
 		FROM orders ORDER BY id DESC LIMIT ?
 	`, limit)
 	if err != nil {
@@ -370,7 +428,7 @@ func (s *Store) ListOrders(limit int) ([]Order, error) {
 		if err := rows.Scan(&o.ID, &o.TradeNo, &o.RequestNo, &o.CommodityID, &o.CommodityName, &o.SharedCode,
 			&o.Contact, &o.Num, &o.Race, &o.Password, &o.Amount, &o.Status, &o.PayStatus, &o.Contents,
 			&o.UpstreamCode, &o.UpstreamMsg, &o.Source, &o.CategoryID, &o.UserID, &o.PaymentID, &o.PayMethod,
-			&o.CreatedAt, &o.UpdatedAt); err != nil {
+			&o.CouponID, &o.Discount, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
@@ -386,7 +444,7 @@ func (s *Store) ListOrdersByUser(userID int64, limit int) ([]Order, error) {
 	rows, err := s.db.Query(`
 		SELECT id, trade_no, request_no, commodity_id, commodity_name, shared_code,
 			contact, num, race, password, amount, status, pay_status, contents,
-			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, created_at, updated_at
+			upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, coupon_id, discount, created_at, updated_at
 		FROM orders WHERE user_id=? ORDER BY id DESC LIMIT ?
 	`, userID, limit)
 	if err != nil {
@@ -399,7 +457,7 @@ func (s *Store) ListOrdersByUser(userID int64, limit int) ([]Order, error) {
 		if err := rows.Scan(&o.ID, &o.TradeNo, &o.RequestNo, &o.CommodityID, &o.CommodityName, &o.SharedCode,
 			&o.Contact, &o.Num, &o.Race, &o.Password, &o.Amount, &o.Status, &o.PayStatus, &o.Contents,
 			&o.UpstreamCode, &o.UpstreamMsg, &o.Source, &o.CategoryID, &o.UserID, &o.PaymentID, &o.PayMethod,
-			&o.CreatedAt, &o.UpdatedAt); err != nil {
+			&o.CouponID, &o.Discount, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, o)

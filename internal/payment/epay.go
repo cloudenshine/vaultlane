@@ -51,7 +51,10 @@ func (e *EpayEngine) CreatePay(ctx context.Context, req *CreateReq) (*CreateResp
 	if e.PID == "" || e.Key == "" {
 		return nil, ErrUnsupported
 	}
-	typeStr := "alipay" // 默认，真实可由调用方传入（这里简化）
+	typeStr := "alipay"
+	if req.PayType != "" {
+		typeStr = req.PayType
+	}
 	params := url.Values{}
 	params.Set("pid", e.PID)
 	params.Set("type", typeStr)

@@ -84,7 +84,14 @@ func (u *UpstreamEngine) Deliver(ctx context.Context, o *store.Order) error {
 	}
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	trade, err := upstream.Trade(u.Up, cctx, params)
+	adp := u.Up
+	if u.Manager != nil && strings.HasPrefix(o.Source, "upstream:") {
+		upName := strings.TrimPrefix(o.Source, "upstream:")
+		if target, ok := u.Manager.Adapter(upName); ok && target != nil {
+			adp = target
+		}
+	}
+	trade, err := upstream.Trade(adp, cctx, params)
 	if err != nil {
 		o.UpstreamCode = -1
 		o.UpstreamMsg = err.Error()

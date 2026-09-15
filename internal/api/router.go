@@ -48,7 +48,11 @@ func Register(r *gin.Engine, cfg *config.Config, defaultUp upstream.Adapter, mgr
 		&delivery.UpstreamEngine{Up: defaultUp, Manager: mgr, Logger: logger},
 		&delivery.EmailEngine{},
 	)
-	d.Notifier = &Notifier{Store: st, Up: defaultUp, Manager: mgr, Logger: logger, Dispatcher: dispatcher}
+	var emailSender *delivery.EmailSender
+	if cfg.SMTP.Host != "" {
+		emailSender = delivery.NewEmailSender(cfg.SMTP)
+	}
+	d.Notifier = &Notifier{Store: st, Up: defaultUp, Manager: mgr, Logger: logger, Dispatcher: dispatcher, Email: emailSender}
 	// 支付管理
 	d.Pay = payment.NewManager()
 	// 余额支付适配器
@@ -65,7 +69,7 @@ func Register(r *gin.Engine, cfg *config.Config, defaultUp upstream.Adapter, mgr
 		d.Pay.Register(payment.NewUSDTEngine(cfg.PayUSDT.Address, cfg.PayUSDT.APIURL))
 	}
 	// 用户 / 支付 handler
-	d.UserH = &UserHandler{Store: st, Logger: logger}
+	d.UserH = &UserHandler{Store: st, Logger: logger, CookieSecure: cfg.Admin.CookieSecure}
 	// VULN-013：业务维度限流 10/min/uid，独立桶（rate=10）
 	d.PayH = &PaymentHandler{Store: st, Up: defaultUp, Pay: d.Pay, Logger: logger, Notify: d.Notifier, UserH: d.UserH, Limiter: NewRateLimiter(10)}
 

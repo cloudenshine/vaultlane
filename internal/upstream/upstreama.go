@@ -49,7 +49,7 @@ func NewUpstreamAAdapter(name string, cfg config.UpstreamConfig) *UpstreamAAdapt
 	}
 	ua := cfg.UserAgent
 	if ua == "" {
-		ua = "FakaGateway/1.0"
+		ua = "Vaultlane/5.0"
 	}
 	return &UpstreamAAdapter{
 		name:        name,

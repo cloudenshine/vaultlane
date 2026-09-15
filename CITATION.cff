@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+title: Vaultlane
+message: If you use this software, please cite it as below.
+type: software
+authors:
+  - name: Vaultlane contributors
+repository-code: https://github.com/cloudenshine/faka-gateway
+url: https://github.com/cloudenshine/faka-gateway
+abstract: >-
+  Self-hosted digital-goods commerce gateway. Aggregates
+  upstream catalogs into a local pool, applies operator
+  pricing, and fulfills from self-operated secrets or
+  supplier APIs.
+keywords:
+  - golang
+  - commerce
+  - digital-goods
+  - payment-gateway
+  - sqlite
+license: MIT
+version: 5.0.0
+date-released: "2026-04-10"

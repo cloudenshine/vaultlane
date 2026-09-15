@@ -23,7 +23,7 @@ func NewHTTPDoer(timeout time.Duration, userAgent string) *HTTPDoer {
 		timeout = 15 * time.Second
 	}
 	if userAgent == "" {
-		userAgent = "FakaGateway/1.0"
+		userAgent = "Vaultlane/5.0"
 	}
 	return &HTTPDoer{
 		client: &http.Client{Timeout: timeout},

@@ -8,6 +8,30 @@ import (
 	"time"
 )
 
+// encryptSecret 如果 Store 有 Cipher，加密卡密内容
+func (s *Store) encryptSecret(content string) string {
+	if s.Cipher == nil {
+		return content
+	}
+	enc, err := s.Cipher.Encrypt(content)
+	if err != nil {
+		return content
+	}
+	return enc
+}
+
+// decryptSecret 如果 Store 有 Cipher，解密卡密内容
+func (s *Store) decryptSecret(content string) string {
+	if s.Cipher == nil {
+		return content
+	}
+	dec, err := s.Cipher.Decrypt(content)
+	if err != nil {
+		return content
+	}
+	return dec
+}
+
 // ceil2 向上取整到 0.01
 func ceil2(v float64) float64 {
 	return math.Ceil(v*100) / 100
@@ -69,6 +93,30 @@ type CardSecret struct {
 func (s *Store) CreateCategory(c *Category) error {
 	now := time.Now()
 	c.CreatedAt = now
+	res, err := s.db.Exec(`INSERT INTO categories (name, icon, sort, parent_id, source, created_at)
+		VALUES (?,?,?,?,?,?)`,
+		c.Name, c.Icon, c.Sort, c.ParentID, c.Source, c.CreatedAt)
+	if err != nil {
+		return err
+	}
+	id, _ := res.LastInsertId()
+	c.ID = id
+	return nil
+}
+
+// UpsertCategory 根据 source 与 name 查找或更新分类（避免重复插入）
+func (s *Store) UpsertCategory(c *Category) error {
+	now := time.Now()
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = now
+	}
+	var existingID int64
+	err := s.db.QueryRow(`SELECT id FROM categories WHERE source=? AND name=? LIMIT 1`, c.Source, c.Name).Scan(&existingID)
+	if err == nil && existingID > 0 {
+		c.ID = existingID
+		_, err := s.db.Exec(`UPDATE categories SET icon=COALESCE(NULLIF(?,''),icon), sort=? WHERE id=?`, c.Icon, c.Sort, existingID)
+		return err
+	}
 	res, err := s.db.Exec(`INSERT INTO categories (name, icon, sort, parent_id, source, created_at)
 		VALUES (?,?,?,?,?,?)`,
 		c.Name, c.Icon, c.Sort, c.ParentID, c.Source, c.CreatedAt)
@@ -556,7 +604,8 @@ func (s *Store) ImportSecrets(commodityID int64, contents []string) (int, error)
 		if c == "" {
 			continue
 		}
-		if _, err := stmt.Exec(commodityID, c, now); err != nil {
+		encrypted := s.encryptSecret(c)
+		if _, err := stmt.Exec(commodityID, encrypted, now); err != nil {
 			return n, err
 		}
 		n++
@@ -600,6 +649,7 @@ func (s *Store) ListSecrets(commodityID int64, status int, limit int) ([]CardSec
 		if err := rows.Scan(&c.ID, &c.CommodityID, &c.Content, &c.Status, &c.OrderID, &c.SoldAt, &c.CreatedAt); err != nil {
 			return nil, err
 		}
+		c.Content = s.decryptSecret(c.Content)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -640,5 +690,7 @@ func (s *Store) PullSecret(commodityID, orderID int64) (*CardSecret, error) {
 	c.Status = 1
 	c.OrderID = orderID
 	c.SoldAt = &now
+	// 解密返回给调用方
+	c.Content = s.decryptSecret(c.Content)
 	return &c, nil
 }

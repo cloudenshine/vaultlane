@@ -86,18 +86,35 @@ func Register(r *gin.Engine, h *Handlers) {
 		// 受保护 API
 		api := g.Group("/api")
 		api.Use(h.requireSession())
+		api.Use(CSRFMiddleware(h.Cfg.Admin.SessionSecret))
 		{
 			api.GET("/dashboard", h.HandleDashboard)
 			api.GET("/orders", h.HandleOrders)
 			api.GET("/commodities", h.HandleListCommodities)
 			api.POST("/commodities", h.HandleCreateCommodity)
-			api.PUT("/commodities/:id", h.HandleUpdateCommodity)
-			api.DELETE("/commodities/:id", h.HandleDeleteCommodity)
+			api.PUT("/commodities/:id", h.RequireTOTP(), h.HandleUpdateCommodity)
+			api.DELETE("/commodities/:id", h.RequireTOTP(), h.HandleDeleteCommodity)
 			api.GET("/secrets", h.HandleListSecrets)
 			api.POST("/secrets/import", h.HandleImportSecrets)
 			api.GET("/audit", h.HandleListAudit) // VULN-012
 			api.GET("/categories", h.HandleListCategories)
 			api.POST("/categories", h.HandleCreateCategory)
+
+			// 优惠券管理
+			api.GET("/coupons", h.HandleListCoupons)
+			api.POST("/coupons", h.HandleCreateCoupon)
+
+			// TOTP 双因子认证管理
+			api.POST("/totp/setup", h.HandleTOTPSetup)
+			api.POST("/totp/confirm", h.HandleTOTPConfirm)
+			api.POST("/totp/disable", h.RequireTOTP(), h.HandleTOTPDisable)
+			api.GET("/totp/status", func(c *gin.Context) {
+				secret := h.Store.GetSettingValue("totp_secret")
+				c.JSON(http.StatusOK, gin.H{"code": 200, "data": gin.H{"enabled": secret != ""}})
+			})
+
+			// 高危操作：批量改价 / 删除 / 余额调整需额外 TOTP
+			// (TOTP 中间件按需挂在具体路由上)
 
 			// 配置中心（可关闭）
 			if h.Cfg.Modules.ConfigCenter {
@@ -694,4 +711,37 @@ func strconvInt64(n int64) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+// HandleListCoupons 列出所有优惠券
+func (h *Handlers) HandleListCoupons(c *gin.Context) {
+	coupons, err := h.Store.ListCoupons()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "success", "data": coupons})
+}
+
+// HandleCreateCoupon 创建优惠券
+func (h *Handlers) HandleCreateCoupon(c *gin.Context) {
+	var coupon store.Coupon
+	if err := c.ShouldBindJSON(&coupon); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误: " + err.Error()})
+		return
+	}
+	if coupon.Code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "券码不能为空"})
+		return
+	}
+	if coupon.Discount <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "折扣/减免金额必须大于0"})
+		return
+	}
+	if err := h.Store.CreateCoupon(&coupon); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		return
+	}
+	h.audit(c, "coupon.create", coupon.Code, gin.H{"name": coupon.Name, "type": coupon.Type, "discount": coupon.Discount})
+	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "创建成功", "data": coupon})
 }

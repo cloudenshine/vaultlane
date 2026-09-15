@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a change to Vaultlane
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What limitation are you hitting today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the desired behavior. Link related ROADMAP.md items if any.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Catalog / upstream
+        - Payments / delivery
+        - Admin console
+        - Storefront
+        - Security
+        - Docs / DX
+        - Other
+    validations:
+      required: true

@@ -1,10 +1,43 @@
-# 变更日志 · CHANGELOG
+# Changelog
 
-> 按时间倒序。每次只记录"用户能感知到的变化"。
+All notable user-facing changes are listed here. Format inspired by [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## v4.0 · 2026-06-17 · 完整版商品池 + 多上游 + 安全加固
+## v5.0.0 · 2026-04-10 · Vaultlane
+
+Product rename: **Vaultlane** (码仓). The Go module path stays `faka-gateway`.
+
+### Added
+
+- Coupon engine (`/api/coupon/verify`, admin coupon CRUD)
+- Referral invite codes and 5% commission on paid orders
+- SMTP card-delivery mailer
+- Timed upstream sync + cost circuit breaker (`modules.upstream_sync`)
+- AES-256-GCM encryption for card secrets
+- Admin CSRF (`X-CSRF-Token`) and optional TOTP 2FA
+- In-process delivery queue with backoff
+- Epay channel aliases (`alipay` / `wxpay` / `qqpay`)
+- GitHub community files: LICENSE, SECURITY, CONTRIBUTING, Code of Conduct, CI
+
+### Fixed
+
+- Multi-upstream fulfillment now routes by `order.Source`
+- Orders prefer the local catalog instead of punching through to the default adapter
+- Payment callbacks are idempotent (`MarkPaymentPaid` must succeed before delivery)
+- `FinishPaidOrderByID` uses `GetOrderByID` instead of scanning 200 rows
+- Category sync upserts instead of duplicating rows
+- Dashboard stats use SQL aggregates
+- Balance checkout creates the order before deducting and refunds on delivery failure
+
+### Security
+
+- User session cookies honor `admin.cookie_secure`
+- Card contents are encrypted at rest when `session_secret` is set
+
+---
+
+## v4.0 · 2026-06-17 · Catalog pool + multi-upstream + hardening
 
 ### 用户能感知到的变化
 

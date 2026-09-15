@@ -29,7 +29,8 @@ type CreateReq struct {
 	NotifyURL string  // 回调地址
 	ReturnURL string  // 同步跳转
 	UserID    int64
-	ExpireSec int // 过期秒数，0 = 默认
+	ExpireSec int    // 过期秒数，0 = 默认
+	PayType   string // 支付渠道细分（alipay/wxpay/qqpay 等）
 }
 
 // CreateResp 创建支付响应

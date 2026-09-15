@@ -24,26 +24,43 @@ func (m *Manager) Register(e Engine) {
 	m.engines[e.Method()] = e
 }
 
-// Get 拿渠道
+// Get 拿渠道。支持 epay:wxpay / wxpay 等别名，统一路由到已注册引擎。
 func (m *Manager) Get(method string) (Engine, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	e, ok := m.engines[method]
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrUnsupported, method)
+	if e, ok := m.engines[method]; ok {
+		return e, nil
 	}
-	return e, nil
+	if e, ok := m.engines[canonicalPayMethod(method)]; ok {
+		return e, nil
+	}
+	return nil, fmt.Errorf("%w: %s", ErrUnsupported, method)
 }
 
-// Methods 列出已注册渠道
+// Methods 列出已注册渠道（易支付展开 alipay/wxpay/qqpay）
 func (m *Manager) Methods() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]string, 0, len(m.engines))
+	out := make([]string, 0, len(m.engines)+3)
 	for k := range m.engines {
 		out = append(out, k)
+		if k == "epay" {
+			out = append(out, "alipay", "wxpay", "qqpay")
+		}
 	}
 	return out
+}
+
+func canonicalPayMethod(method string) string {
+	switch method {
+	case "alipay", "wxpay", "qqpay", "bank":
+		return "epay"
+	default:
+		if len(method) > 5 && method[:5] == "epay:" {
+			return "epay"
+		}
+		return method
+	}
 }
 
 // EngineExists 是否启用某渠道

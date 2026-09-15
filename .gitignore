@@ -4,6 +4,8 @@ data/*.db-journal
 logs/
 faka-gateway
 faka-gateway.exe
+vaultlane
+vaultlane.exe
 *.log
 .DS_Store
 .air/

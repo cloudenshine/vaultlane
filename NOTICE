@@ -1,0 +1,7 @@
+Vaultlane (码仓)
+Copyright 2026 Vaultlane contributors
+
+This product includes software developed by the Vaultlane contributors.
+The Go module path remains `faka-gateway` for import stability.
+
+Licensed under the MIT License. See LICENSE.

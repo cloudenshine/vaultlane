@@ -34,7 +34,7 @@ func TestClient_New_Defaults(t *testing.T) {
 	if c.cfg.Timeout != 20 {
 		t.Errorf("default timeout = %d, want 20", c.cfg.Timeout)
 	}
-	if c.cfg.UserAgent != "FakaGateway/2.0" {
+	if c.cfg.UserAgent != "Vaultlane/5.0" {
 		t.Errorf("default ua = %s", c.cfg.UserAgent)
 	}
 }

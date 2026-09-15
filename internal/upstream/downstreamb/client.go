@@ -70,7 +70,7 @@ func New(cfg Config, logger *slog.Logger) *Client {
 		cfg.RetryMax = 0
 	}
 	if cfg.UserAgent == "" {
-		cfg.UserAgent = "FakaGateway/2.0"
+		cfg.UserAgent = "Vaultlane/5.0"
 	}
 	if logger == nil {
 		logger = slog.Default()

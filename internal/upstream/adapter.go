@@ -41,7 +41,7 @@ type Adapter interface {
 func BuildAdapter(e config.UpstreamEntry) Adapter {
 	ua := e.UserAgent
 	if ua == "" {
-		ua = "FakaGateway/1.0"
+		ua = "Vaultlane/5.0"
 	}
 	timeout := e.Timeout
 	if timeout == 0 {

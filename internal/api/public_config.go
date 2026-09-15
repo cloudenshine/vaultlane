@@ -15,7 +15,7 @@ import (
 // 来自外部的请求只返回 site_name，避免泄露上游基础 URL。
 func (d *Deps) handlePublicConfig(c *gin.Context) {
 	data := gin.H{
-		"site_name": "码仓 MASTORE",
+		"site_name": "Vaultlane",
 	}
 	if originTrusted(c, d.Cfg) {
 		data["upstream_base"] = d.Cfg.Upstream.BaseURL

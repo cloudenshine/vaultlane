@@ -1,4 +1,4 @@
-/* ============== 码仓 MASTORE · 客户端 SPA ============== */
+/* ============== Vaultlane · 码仓 客户端 SPA ============== */
 (() => {
 'use strict';
 
@@ -331,6 +331,7 @@ function renderRegisterPage() {
           <div class="field"><label>用户名</label><input id="reg-username" placeholder="3-20 位字母/数字/下划线" /></div>
           <div class="field"><label>邮箱</label><input id="reg-email" type="email" placeholder="email@example.com" /></div>
           <div class="field"><label>密码</label><input id="reg-password" type="password" placeholder="6-64 位" /></div>
+          <div class="field"><label>邀请码（可选）</label><input id="reg-invite" placeholder="INV0001ABC" /></div>
           <div class="form-actions">
             <button class="btn btn-primary" onclick="Mastore.doRegister()">注册</button>
             <a class="btn" href="#/login">已有账号？登录</a>
@@ -344,8 +345,9 @@ async function doRegister() {
   const username = $('#reg-username')?.value.trim();
   const email = $('#reg-email')?.value.trim();
   const password = $('#reg-password')?.value;
+  const invite_code = $('#reg-invite')?.value.trim();
   if (!username || !email || !password) { toast('请完整填写'); return; }
-  const r = await apiPost('/api/user/register', { username, email, password });
+  const r = await apiPost('/api/user/register', { username, email, password, invite_code });
   if (r.code !== 200) { toast(r.msg || '注册失败'); return; }
   localStorage.setItem('mastore_user', JSON.stringify(r.data));
   toast('注册成功');
@@ -384,11 +386,29 @@ async function renderProfilePage() {
           <button class="btn" onclick="Mastore.doLogout()">退出登录</button>
         </div>
       </div>
+      <div class="card" id="referral-card">
+        <div class="card-head"><h2>邀请返佣</h2></div>
+        <div class="profile-info" id="referral-box"><div class="empty-sub">加载中…</div></div>
+      </div>
       <div class="card">
         <div class="card-head"><h2>最近订单</h2></div>
         <div class="profile-orders">${orders}</div>
       </div>
     </div>`;
+  try {
+    const ref = await apiGet('/api/user/referral');
+    const box = document.getElementById('referral-box');
+    if (box && ref.code === 200 && ref.data) {
+      const d = ref.data;
+      box.innerHTML = `
+        <div class="kv-row"><span class="kv-key">邀请码</span><span class="kv-val"><code>${escapeHtml(d.invite_code||'')}</code></span></div>
+        <div class="kv-row"><span class="kv-key">邀请人数</span><span class="kv-val">${d.total_invites||0}</span></div>
+        <div class="kv-row"><span class="kv-key">累计返佣</span><span class="kv-val">¥${(d.total_commission||0).toFixed(2)}</span></div>
+        <div class="kv-row"><span class="kv-key">佣金余额</span><span class="kv-val">¥${(d.commission_balance||0).toFixed(2)}</span></div>`;
+    } else if (box) {
+      box.innerHTML = '<div class="empty-sub">暂无邀请数据</div>';
+    }
+  } catch (e) {}
 }
 
 async function doLogout() {
@@ -913,6 +933,10 @@ function openOrderableDrawer(detail) {
       <label>联系方式（邮箱 / 手机号）</label>
       <input id="contact-input" type="text" placeholder="your@email.com 或 138xxxxxxxx" />
     </div>
+    <div class="drawer-field">
+      <label>优惠券码（可选）</label>
+      <input id="coupon-input" type="text" placeholder="如 NEW10" />
+    </div>
 
     ${State.drawerCommodity.password_status ? `<div class="drawer-field">
       <label>查询密码（取卡密时需要）</label>
@@ -968,11 +992,14 @@ async function submitOrderByCode() {
   btn.textContent = '提交中…';
 
   try {
+    const couponCode = $('#coupon-input')?.value.trim() || '';
     const body = {
       contact,
       num: qty,
       password,
+      pay_method: 'balance',
     };
+    if (couponCode) body.coupon_code = couponCode;
     if (c.shared_code) {
       body.shared_code = c.shared_code;
       if (State.drawerSpec?.race) body.race = State.drawerSpec.race;

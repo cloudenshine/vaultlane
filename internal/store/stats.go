@@ -17,11 +17,23 @@ type TopCommodity struct {
 	Revenue       float64 `json:"revenue"`
 }
 
+// OrderSummaryRange 使用 SQL 聚合统计区间订单量与有效收入
+func (s *Store) OrderSummaryRange(from, to time.Time) (int, float64, error) {
+	row := s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(CASE WHEN status >= 1 THEN amount ELSE 0 END), 0)
+		FROM orders WHERE created_at BETWEEN ? AND ?`, from, to)
+	var count int
+	var rev float64
+	if err := row.Scan(&count, &rev); err != nil {
+		return 0, 0, err
+	}
+	return count, rev, nil
+}
+
 // OrdersRange 区间订单
 func (s *Store) OrdersRange(from, to time.Time) ([]Order, error) {
 	rows, err := s.db.Query(`SELECT id, trade_no, request_no, commodity_id, commodity_name, shared_code,
 		contact, num, race, password, amount, status, pay_status, contents,
-		upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, created_at, updated_at
+		upstream_code, upstream_msg, source, category_id, user_id, payment_id, pay_method, coupon_id, discount, created_at, updated_at
 		FROM orders WHERE created_at BETWEEN ? AND ? ORDER BY id DESC`, from, to)
 	if err != nil {
 		return nil, err
@@ -33,7 +45,7 @@ func (s *Store) OrdersRange(from, to time.Time) ([]Order, error) {
 		if err := rows.Scan(&o.ID, &o.TradeNo, &o.RequestNo, &o.CommodityID, &o.CommodityName, &o.SharedCode,
 			&o.Contact, &o.Num, &o.Race, &o.Password, &o.Amount, &o.Status, &o.PayStatus, &o.Contents,
 			&o.UpstreamCode, &o.UpstreamMsg, &o.Source, &o.CategoryID, &o.UserID, &o.PaymentID, &o.PayMethod,
-			&o.CreatedAt, &o.UpdatedAt); err != nil {
+			&o.CouponID, &o.Discount, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, o)

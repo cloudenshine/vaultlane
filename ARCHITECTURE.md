@@ -1,6 +1,8 @@
-# 架构说明 · ARCHITECTURE
+# Architecture
 
-> 写给想改代码的人。讲清 v4 的设计、各模块关系、扩展点。
+> For people who will change the code. Vaultlane 5.0 keeps the v4 catalog-pool design and adds fulfillment, commerce, and security modules.
+
+**Names:** product = Vaultlane (码仓); Go module = `faka-gateway`; binary = `vaultlane`.
 
 ## 一、设计目标
 
@@ -199,7 +201,7 @@ type ModulesConfig struct {
 - `upstream.Manager` 用 `sync.RWMutex` 保护 adapters map
 - 同步上游时多 adapter 并发（每 adapter 独立 goroutine + `sync.WaitGroup`）
 - HTTP 请求每 adapter 独立 `*http.Client`，可独立超时
-- SQLite 单写（`db.SetMaxOpenConns(1)`）
+- SQLite 单写（`db.SetMaxOpenConns(1)`）+ WAL / `busy_timeout=5000`
 
 ## 六、关键设计决策
 
@@ -221,7 +223,7 @@ type ModulesConfig struct {
 
 ### 5. 为什么 8080 端口可能冲突？
 
-**答**：开发机常被其他服务占。`LISTEN_ADDR=127.0.0.1:9090 ./faka-gateway.exe` 即可。
+**答**：开发机常被其他服务占。`LISTEN_ADDR=127.0.0.1:9090 ./vaultlane` 即可。
 
 ## 七、扩展点
 
@@ -303,11 +305,11 @@ modules:
 
 ## 九、已知限制
 
-1. **没做定时同步**：需要手动点"⬇ 同步上游"。`UpstreamSync` 模块开关已留位，未实现
-2. **没做库存预警通知**：`stock_warning` 字段已存，UI 未展示
-3. **没做自动下架超期商品**：`MarkUpstreamMissing` 已实现，未挂定时任务
-4. **downstream-b 30+ 接口已写但未与商品池打通**：需 v5 改造
-5. **前台用户中心简陋**：v5 重做
+1. **库存预警通知未接通道**：`stock_warning` 字段已存，UI / 邮件告警未做完
+2. **超期商品自动下架未挂定时任务**：`MarkUpstreamMissing` 已实现
+3. **downstream-b 30+ 接口未与商品池打通**
+4. **存储仍是单机 SQLite**（WAL 已开）；PostgreSQL / Redis 见 ROADMAP
+5. **前台仍是嵌入式 vanilla SPA**，不是 Vue 3 分离架构
 
 ## 十、文件变更记录（v4.0）
 

@@ -1,4 +1,7 @@
-# 安全审计报告 · SECURITY_AUDIT
+# Security audit (historical)
+
+> Snapshot of the v4.0 source audit. Fixes listed here are already in tree.
+> New reports: see [SECURITY.md](SECURITY.md). Product name as of 5.0: **Vaultlane**.
 
 > 静态代码审计（基于源码，不做运行时测试）
 > 审计时间：2026-06-17
@@ -333,7 +336,7 @@ db.SetMaxOpenConns(1)
 
 ### 1. 启动
 ```bash
-LISTEN_ADDR=127.0.0.1:8090 ./faka-gateway.exe
+LISTEN_ADDR=127.0.0.1:8090 ./vaultlane
 # 准备好 1 件自营商品（id=X）+ 余额 ¥100 的测试用户
 ```
 

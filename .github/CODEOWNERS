@@ -1,0 +1,8 @@
+# Default reviewers for community files and the core runtime.
+*       @cloudenshine
+/.github/ @cloudenshine
+/config/ @cloudenshine
+/internal/api/ @cloudenshine
+/internal/admin/ @cloudenshine
+/internal/payment/ @cloudenshine
+/internal/store/ @cloudenshine

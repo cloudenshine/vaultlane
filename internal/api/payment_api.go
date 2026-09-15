@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"faka-gateway/internal/delivery"
 	"faka-gateway/internal/payment"
 	"faka-gateway/internal/store"
 	"faka-gateway/internal/upstream"
@@ -44,6 +45,8 @@ func (p *PaymentHandler) RegisterRoutes(g *gin.RouterGroup, requireUser gin.Hand
 	g.POST("/payment/balance/finish", p.UserH.RequireUserStrict(), p.handleBalanceFinish) // 余额内部结束
 	// 可用支付方式（公开）
 	g.GET("/payment/methods", p.handlePaymentMethods)
+	// 优惠券校验（公开）
+	g.POST("/coupon/verify", p.handleCouponVerify)
 }
 
 // Notifier 发货引擎抽象（避免 payment 包依赖 upstream/store 实现）
@@ -53,6 +56,7 @@ type Notifier struct {
 	Manager    *upstream.Manager
 	Logger     *slog.Logger
 	Dispatcher DispatcherIface
+	Email      *delivery.EmailSender
 }
 
 // DispatcherIface 解耦 delivery 包
@@ -83,6 +87,20 @@ func (n *Notifier) FinishPaidOrder(tradeNo string) error {
 	if err := n.deliver(order); err != nil {
 		n.Logger.Error("deliver failed", "trade", tradeNo, "err", sanitizeLogValue(err.Error()))
 		return err
+	}
+	// 优惠券核销
+	if order.CouponID > 0 {
+		_ = n.Store.UseCoupon(order.CouponID, order.UserID, order.ID, order.Discount)
+	}
+	// 分销返佣 (5%)
+	if order.UserID > 0 && order.Amount > 0 {
+		_ = n.Store.ProcessOrderCommission(order.ID, order.UserID, order.Amount, 0.05)
+	}
+	// 邮件发卡通知
+	if n.Email != nil && order.Contact != "" {
+		go func(ord store.Order) {
+			_ = n.Email.SendDeliveryEmail(&ord)
+		}(*order)
 	}
 	return nil
 }
@@ -133,6 +151,35 @@ type orderReqV3 struct {
 	Password    string `json:"password"`
 	PayMethod   string `json:"pay_method"` // balance / epay / "" = 不支付
 	NeedPay     bool   `json:"need_pay"`   // true: 等待支付; false: 直接发卡(自营/老链路)
+	CouponCode  string `json:"coupon_code"`// 优惠券码
+	InviteCode  string `json:"invite_code"`// 邀请码
+}
+
+func (p *PaymentHandler) handleCouponVerify(c *gin.Context) {
+	var req struct {
+		Code   string  `json:"code"`
+		Amount float64 `json:"amount"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "参数错误"})
+		return
+	}
+	uid := currentUserID(c)
+	coupon, discount, err := p.Store.ValidateCoupon(req.Code, req.Amount, uid)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200, "msg": "success",
+		"data": gin.H{
+			"coupon_id":   coupon.ID,
+			"code":        coupon.Code,
+			"name":        coupon.Name,
+			"discount":    discount,
+			"final_price": req.Amount - discount,
+		},
+	})
 }
 
 func (p *PaymentHandler) handleOrderCreateV3(c *gin.Context) {
@@ -165,13 +212,34 @@ func (p *PaymentHandler) handleOrderCreateV3(c *gin.Context) {
 	detailCardID := 0
 	isSelf := false
 
+	var com *store.Commodity
+	if req.CommodityID > 0 {
+		com, _ = p.Store.GetCommodityByID(int64(req.CommodityID))
+	}
+
 	if sharedCode == "" {
-		if com, _ := p.Store.GetCommodityByID(int64(req.CommodityID)); com != nil && com.Source == "self" {
-			isSelf = true
-			sharedCode = "self-" + strconv.FormatInt(com.ID, 10)
+		if com != nil {
 			detailName = com.Name
-			detailPrice = com.Price
-			detailMin, detailMax = 1, com.Stock
+			detailPrice = com.SalePrice
+			if detailPrice <= 0 {
+				detailPrice = com.Price
+			}
+			detailMin, detailMax = com.Minimum, com.Maximum
+			if detailMax <= 0 {
+				detailMax = com.Stock
+			}
+			if detailMin <= 0 {
+				detailMin = 1
+			}
+			if com.Source == "self" {
+				isSelf = true
+				sharedCode = "self-" + strconv.FormatInt(com.ID, 10)
+			} else {
+				sharedCode = com.SharedCode
+				if sharedCode == "" {
+					sharedCode = com.OuterID
+				}
+			}
 		} else {
 			ctx, cancel := ctxWithTimeout(c, 15*time.Second)
 			defer cancel()
@@ -207,6 +275,35 @@ func (p *PaymentHandler) handleOrderCreateV3(c *gin.Context) {
 	uid := currentUserID(c)
 	requestNo := randomToken(16)
 
+	// 推荐人绑定
+	if req.InviteCode != "" && uid > 0 {
+		_, _ = p.Store.BindReferrer(uid, req.InviteCode)
+	}
+
+	// 优惠券折扣计算
+	discount := 0.0
+	var couponID int64 = 0
+	if req.CouponCode != "" {
+		cObj, disc, err := p.Store.ValidateCoupon(req.CouponCode, amount, uid)
+		if err == nil && cObj != nil {
+			discount = disc
+			couponID = cObj.ID
+			amount -= discount
+			if amount < 0 {
+				amount = 0
+			}
+		}
+	}
+
+	orderSource := "self"
+	if !isSelf {
+		if com != nil && com.Source != "" {
+			orderSource = com.Source
+		} else {
+			orderSource = "upstream:upstreama"
+		}
+	}
+
 	// 余额支付：直接走完
 	if req.PayMethod == "balance" {
 		if uid <= 0 {
@@ -236,37 +333,57 @@ func (p *PaymentHandler) handleOrderCreateV3(c *gin.Context) {
 			Amount:        amount,
 			Status:        0,
 			UserID:        uid,
-			Source:        ifStr(isSelf, "self", "upstream:upstreama"),
+			Source:        orderSource,
 			PayMethod:     "balance",
+			CouponID:      couponID,
+			Discount:      discount,
 		}
-		// 扣余额
-		newBal, err := p.Store.AdjustBalance(uid, -amount, "consume", "订单 "+requestNo, 0)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "余额扣减失败: " + err.Error()})
-			return
-		}
-		_ = newBal
-		// 发卡
-		if isSelf {
-			// 自营
-			if err := p.deliverSelf(order, req.Num); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
-				return
-			}
-		} else {
-			// 上游：调 upstream
-			if err := p.deliverUpstream(order, req.Contact, req.Race, req.Password, detailCardID); err != nil {
-				c.JSON(http.StatusBadGateway, gin.H{"code": 502, "msg": "上游发卡失败: " + err.Error()})
-				return
-			}
-		}
-		// 写订单（落库）
+		// 先落订单，再扣余额、再发卡：失败可原路退回，卡密也能绑定真实 order_id
 		if err := p.Store.CreateOrder(order); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "保存订单失败: " + err.Error()})
 			return
 		}
+		newBal, err := p.Store.AdjustBalance(uid, -amount, "consume", "订单 "+requestNo, order.ID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "余额扣减失败: " + err.Error()})
+			return
+		}
+		if isSelf {
+			if err := p.deliverSelf(order, req.Num); err != nil {
+				_, _ = p.Store.AdjustBalance(uid, amount, "refund", "发卡失败退款 "+requestNo, order.ID)
+				order.Status = 5
+				order.UpstreamMsg = err.Error()
+				_ = p.Store.UpdateOrder(order)
+				c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+				return
+			}
+		} else {
+			if err := p.deliverUpstream(order, req.Contact, req.Race, req.Password, detailCardID); err != nil {
+				_, _ = p.Store.AdjustBalance(uid, amount, "refund", "上游发卡失败退款 "+requestNo, order.ID)
+				order.Status = 5
+				order.UpstreamMsg = err.Error()
+				_ = p.Store.UpdateOrder(order)
+				c.JSON(http.StatusBadGateway, gin.H{"code": 502, "msg": "上游发卡失败: " + err.Error()})
+				return
+			}
+		}
+		_ = p.Store.UpdateOrder(order)
 		// 关联余额流水 order_id
 		_ = p.Notify.linkBalanceLogToOrder(uid, order.ID, requestNo)
+		// 核销优惠券
+		if couponID > 0 {
+			_ = p.Store.UseCoupon(couponID, uid, order.ID, discount)
+		}
+		// 分销返佣 (5%)
+		if uid > 0 && amount > 0 {
+			_ = p.Store.ProcessOrderCommission(order.ID, uid, amount, 0.05)
+		}
+		// 邮件发卡通知
+		if p.Notify != nil && p.Notify.Email != nil && order.Contact != "" {
+			go func(ord store.Order) {
+				_ = p.Notify.Email.SendDeliveryEmail(&ord)
+			}(*order)
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"code": 200, "msg": "支付成功",
 			"data": gin.H{
@@ -293,8 +410,10 @@ func (p *PaymentHandler) handleOrderCreateV3(c *gin.Context) {
 		Amount:        amount,
 		Status:        0,
 		UserID:        uid,
-		Source:        ifStr(isSelf, "self", "upstream:upstreama"),
+		Source:        orderSource,
 		PayMethod:     req.PayMethod,
+		CouponID:      couponID,
+		Discount:      discount,
 	}
 	if err := p.Store.CreateOrder(order); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "保存订单失败: " + err.Error()})
@@ -343,6 +462,7 @@ func (p *PaymentHandler) handleOrderCreateV3(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不支持的支付方式: " + req.PayMethod})
 		return
 	}
+	payType := epayPayType(req.PayMethod)
 	pay := &store.Payment{
 		OrderID: order.ID,
 		UserID:  uid,
@@ -365,6 +485,7 @@ func (p *PaymentHandler) handleOrderCreateV3(c *gin.Context) {
 		Amount:  amount,
 		Subject: detailName,
 		UserID:  uid,
+		PayType: payType,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"code": 502, "msg": "创建支付失败: " + err.Error()})
@@ -446,13 +567,10 @@ func (p *PaymentHandler) handlePaymentCreate(c *gin.Context) {
 	var order *store.Order
 	var err error
 	if req.OrderID > 0 {
-		// 通过 trade_no 反查
-		all, _ := p.Store.ListOrders(200)
-		for i := range all {
-			if all[i].ID == req.OrderID {
-				order = &all[i]
-				break
-			}
+		order, err = p.Store.GetOrderByID(req.OrderID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+			return
 		}
 	}
 	if order == nil && req.TradeNo != "" {
@@ -475,6 +593,7 @@ func (p *PaymentHandler) handlePaymentCreate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不支持的支付方式"})
 		return
 	}
+	payType := epayPayType(req.Method)
 	uid := currentUserID(c)
 	pay := &store.Payment{
 		OrderID: order.ID,
@@ -493,6 +612,7 @@ func (p *PaymentHandler) handlePaymentCreate(c *gin.Context) {
 		Amount:  order.Amount,
 		Subject: order.CommodityName,
 		UserID:  uid,
+		PayType: payType,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"code": 502, "msg": "创建支付失败: " + err.Error()})
@@ -587,8 +707,14 @@ func (p *PaymentHandler) handlePaymentCallback(c *gin.Context) {
 			return
 		}
 	}
-	if _, err := p.Store.MarkPaymentPaid(pay.ID, notify.OutTradeNo, notify.Raw); err != nil {
+	paid, err := p.Store.MarkPaymentPaid(pay.ID, notify.OutTradeNo, notify.Raw)
+	if err != nil {
 		p.Logger.Error("mark paid failed", "err", sanitizeLogValue(err.Error()))
+	}
+	if !paid {
+		p.Logger.Info("payment already marked as paid, skipping delivery", "out_trade_no", notify.OutTradeNo)
+		c.String(http.StatusOK, "success")
+		return
 	}
 	// 触发发货
 	if err := p.Notify.FinishPaidOrderByID(pay.OrderID); err != nil {
@@ -648,7 +774,7 @@ func (p *PaymentHandler) deliverSelf(o *store.Order, num int) error {
 	// 1. 保存订单
 	secrets := []string{}
 	for i := 0; i < num; i++ {
-		cs, err := p.Store.PullSecret(int64(o.CommodityID), 0)
+		cs, err := p.Store.PullSecret(int64(o.CommodityID), o.ID)
 		if err != nil {
 			return err
 		}
@@ -682,7 +808,14 @@ func (p *PaymentHandler) deliverUpstream(o *store.Order, contact, race, password
 	if cardID > 0 {
 		params["card_id"] = []string{strconv.Itoa(cardID)}
 	}
-	trade, err := upstream.Trade(p.Up, ctx, params)
+	adp := p.Up
+	if p.Notify != nil && p.Notify.Manager != nil && strings.HasPrefix(o.Source, "upstream:") {
+		upName := strings.TrimPrefix(o.Source, "upstream:")
+		if target, ok := p.Notify.Manager.Adapter(upName); ok && target != nil {
+			adp = target
+		}
+	}
+	trade, err := upstream.Trade(adp, ctx, params)
 	if err != nil {
 		o.UpstreamCode = -1
 		o.UpstreamMsg = err.Error()
@@ -700,17 +833,14 @@ func (p *PaymentHandler) deliverUpstream(o *store.Order, contact, race, password
 
 // FinishPaidOrderByID 通过 order id 完成
 func (n *Notifier) FinishPaidOrderByID(orderID int64) error {
-	// 通过支付表 join? 这里简单：ListOrders 找
-	all, err := n.Store.ListOrders(200)
+	order, err := n.Store.GetOrderByID(orderID)
 	if err != nil {
 		return err
 	}
-	for i := range all {
-		if all[i].ID == orderID {
-			return n.FinishPaidOrder(all[i].TradeNo)
-		}
+	if order == nil {
+		return errors.New("order not found by id")
 	}
-	return errors.New("order not found by id")
+	return n.FinishPaidOrder(order.TradeNo)
 }
 
 func (n *Notifier) linkBalanceLogToOrder(userID, orderID int64, tradeNo string) error {
@@ -743,6 +873,17 @@ func ifStr(cond bool, a, b string) string {
 		return a
 	}
 	return b
+}
+
+func epayPayType(method string) string {
+	switch method {
+	case "wxpay", "qqpay", "alipay", "bank":
+		return method
+	}
+	if strings.HasPrefix(method, "epay:") {
+		return strings.TrimPrefix(method, "epay:")
+	}
+	return "alipay"
 }
 
 func c2background() context.Context { return context.Background() }

@@ -24,14 +24,12 @@ func (d *Deps) handleCategories(c *gin.Context) {
 	// 1. 自营分类
 	self, _ := d.Store.ListCategories()
 
-	// 2. 商品池聚合的 source 标签
-	allComms, _, _ := d.Store.ListCommodities(0, "", 1, 1000)
-	srcByName := map[string]int{}
-	for _, cc := range allComms {
-		if cc.Source != "self" {
-			srcByName[cc.Source]++
-		}
+	// 2. 商品池聚合的 source 标签（使用全量聚合避免截断）
+	srcByName, _ := d.Store.CountCommoditiesBySource()
+	if srcByName == nil {
+		srcByName = map[string]int{}
 	}
+	delete(srcByName, "self")
 
 	type mergedCat struct {
 		ID       int    `json:"id"`

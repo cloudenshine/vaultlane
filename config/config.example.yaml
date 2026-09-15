@@ -1,0 +1,66 @@
+# Vaultlane (码仓) example configuration.
+# Copy to config.yaml, then fill admin.password_hash and admin.session_secret.
+# Never commit real secrets. See SECURITY.md.
+
+server:
+  listen: "127.0.0.1:8090"
+  mode: "release"            # debug | release | test
+  read_timeout: 15
+  write_timeout: 15
+  # VULN-018 / VULN-022：同站 origin 白名单（host 形式，含端口）。
+  # 用于 (a) 限制跨域请求 (b) 决定 /api/public/config 是否返回 upstream_base。
+  # 留空时 CORS 拒绝所有跨域，public_config 仅在同源直访时返 upstream_base。
+  allowed_origins: []
+
+upstream:
+  base_url: "https://upstream-api.example.com"  # 上游网关 API 地址
+  app_id: "YOUR_APP_ID"                         # 上游分配的 app_id
+  app_key: "YOUR_APP_KEY"                       # 上游分配的 app_key
+  timeout: 15
+  retry_max: 2
+  user_agent: "Vaultlane/5.0"
+
+cache:
+  category_ttl: 300         # 分类缓存 5 分钟
+  commodity_list_ttl: 60    # 商品列表 1 分钟
+  commodity_detail_ttl: 30  # 商品详情 30 秒
+  max_entries: 512
+
+ratelimit:
+  per_ip_per_min: 60        # 单 IP 每分钟 60 次
+
+pricing:
+  global:
+    type: 0                 # 0=固定金额 1=百分比
+    amount: 0.0
+  category_overrides: {}     # {category_id: {type, amount}}
+  commodity_overrides: {}    # {commodity_id: {type, amount}}
+
+admin:
+  # 旧 token 字段已删除（VULN-005）：改用 cookie session 唯一鉴权
+  username: "admin"
+  password_hash: ""  # 用 cmd/hash-password 生成 bcrypt hash，不要用默认值！
+  session_secret: ""  # 用 openssl rand -base64 32 生成，生产必改！
+  cookie_secure: false  # VULN-017：开发 HTTP 留 false，生产 HTTPS 必须 true
+  cookie_max_age: 28800  # 8 小时
+
+# ============ 可选模块开关 ============
+# 全部默认关闭。需要哪个功能就打开哪个，避免"半成品"代码暴露
+modules:
+  coupon: false         # 优惠券系统
+  referral: false       # 邀请返佣
+  email: false          # 邮件通知（需配 smtp 段）
+  upstream_sync: false  # 上游商品自动同步（上游 → 本地）
+  downstream_callback: false   # 下游回调（如需对接下游网关）
+  finance_stats: true   # 财务统计（订单/收入/Top/支付）
+  config_center: true   # 配置中心（mock/限流等运行时设置）
+  integrations: true    # 上下游对接面板
+
+# ============ SMTP（email 模块启用后必填）============
+smtp:
+  host: ""              # smtp.example.com
+  port: 465
+  username: ""
+  password: ""
+  from: ""              # noreply@example.com
+  use_tls: true

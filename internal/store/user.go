@@ -318,3 +318,17 @@ func (s *Store) ListSettings() ([]Setting, error) {
 	}
 	return out, rows.Err()
 }
+
+// GetSettingValue 便捷方法：返回字符串值，不存在时返回空字符串
+func (s *Store) GetSettingValue(key string) string {
+	st, err := s.GetSetting(key)
+	if err != nil || st == nil {
+		return ""
+	}
+	return st.Value
+}
+
+// SetSetting 便捷方法：以 string 类型写入配置项
+func (s *Store) SetSetting(key, value string) error {
+	return s.UpsertSetting(key, value, "string")
+}

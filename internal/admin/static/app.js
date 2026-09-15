@@ -1,4 +1,4 @@
-// AdminApp 后台前端（独立命名空间，与 Mastore 完全隔离）
+// AdminApp 后台前端（独立命名空间，与前台 Vaultlane SPA 隔离）
 const AdminApp = {
   state: { tab: 'dashboard', user: null },
 
@@ -20,9 +20,25 @@ const AdminApp = {
 
     // 退出
     document.getElementById('logout').onclick = async () => {
-      await fetch('/admin/api/logout', { method: 'POST', credentials: 'same-origin' });
+      await fetch('/admin/api/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': this.csrfToken() },
+      });
       location.href = '/admin';
     };
+  },
+
+  csrfToken() {
+    const m = document.cookie.match(/(?:^|; )admin_csrf=([^;]*)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  },
+
+  totpHeaders(extra) {
+    const h = Object.assign({ 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrfToken() }, extra || {});
+    const totp = this.state.totpCode || sessionStorage.getItem('admin_totp') || '';
+    if (totp) h['X-TOTP-Code'] = totp;
+    return h;
   },
 
   toast(msg, type) {
@@ -39,22 +55,25 @@ const AdminApp = {
   },
 
   api(path, opts) {
-    return fetch('/admin/api' + path, Object.assign({ credentials: 'same-origin' }, opts || {}))
+    opts = opts || {};
+    const headers = Object.assign({}, this.totpHeaders(), opts.headers || {});
+    if ((opts.method || 'GET') === 'GET') delete headers['Content-Type'];
+    return fetch('/admin/api' + path, Object.assign({ credentials: 'same-origin' }, opts, { headers }))
       .then(r => r.json());
   },
 
-  postJSON(path, body) {
+  postJSON(path, body, method) {
     return this.api(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      method: method || 'POST',
+      headers: this.totpHeaders(),
+      body: JSON.stringify(body || {}),
     });
   },
 
   putJSON(path, body) {
     return this.api(path, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.totpHeaders(),
       body: JSON.stringify(body),
     });
   },
@@ -67,6 +86,7 @@ const AdminApp = {
       'stats': M.finance_stats === false,
       'downstream': M.integrations === false,
       'settings': M.config_center === false,
+      'coupons': M.coupon === false,
     };
     if (disabled[hash]) { location.hash = '#dashboard'; return; }
     this.state.tab = hash;
@@ -636,6 +656,22 @@ const AdminApp = {
             </div>
           </div>
         </div>
+        <div class="card">
+          <div class="card-head"><h2>TOTP 双因子认证</h2></div>
+          <div class="form">
+            <p style="color:var(--ink-2);font-size:12px;margin-bottom:8px">高危操作（改价/删除/关闭 TOTP）启用后需携带 6 位验证码。</p>
+            <div class="field"><label>当前会话验证码（可选缓存）</label>
+              <input id="set-totp-code" placeholder="6 位数字" maxlength="6" />
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn" onclick="AdminApp.saveTotpSession()">缓存验证码</button>
+              <button class="btn btn-primary" onclick="AdminApp.setupTotp()">生成密钥</button>
+              <button class="btn" onclick="AdminApp.confirmTotp()">确认激活</button>
+              <button class="btn btn-danger" onclick="AdminApp.disableTotp()">禁用</button>
+            </div>
+            <pre id="totp-setup-box" style="white-space:pre-wrap;font-size:12px;margin-top:10px"></pre>
+          </div>
+        </div>
       `;
     });
   },
@@ -664,12 +700,90 @@ const AdminApp = {
     });
   },
 
+  saveTotpSession() {
+    const code = (document.getElementById('set-totp-code')?.value || '').trim();
+    this.state.totpCode = code;
+    if (code) sessionStorage.setItem('admin_totp', code);
+    else sessionStorage.removeItem('admin_totp');
+    this.toast(code ? '已缓存 TOTP' : '已清除 TOTP', 'ok');
+  },
+  async setupTotp() {
+    const j = await this.postJSON('/totp/setup', {});
+    const box = document.getElementById('totp-setup-box');
+    if (j.code === 200) {
+      const d = j.data || {};
+      box.textContent = '密钥: ' + (d.secret || '') + '\nURI: ' + (d.otp_url || '') + '\n请用 Authenticator 扫描后点「确认激活」';
+    } else this.toast(j.msg || '生成失败', 'err');
+  },
+  async confirmTotp() {
+    const code = prompt('请输入 Authenticator 当前 6 位验证码：');
+    if (!code) return;
+    const j = await this.postJSON('/totp/confirm', { code });
+    if (j.code === 200) { this.toast('TOTP 已激活', 'ok'); this.render_settings(); }
+    else this.toast(j.msg || '激活失败', 'err');
+  },
+  async disableTotp() {
+    const code = prompt('禁用 TOTP 需要当前验证码：');
+    if (!code) return;
+    this.state.totpCode = code;
+    const j = await this.postJSON('/totp/disable', { code });
+    if (j.code === 200) { this.toast('已禁用', 'ok'); this.render_settings(); }
+    else this.toast(j.msg || '禁用失败', 'err');
+  },
+
   saveRateLimit() {
     const body = { rate_limit: parseInt(document.getElementById('set-ratelimit').value) || 60 };
     this.putJSON('/settings', body).then(j => {
       if (j.code === 200) { this.toast('已保存（重启后生效）', 'ok'); this.render_settings(); }
       else this.toast(j.msg, 'err');
     });
+  },
+
+  render_coupons() {
+    document.getElementById('main').innerHTML = '<div class="loading">加载中…</div>';
+    this.api('/coupons').then(j => {
+      const rows = j.data || [];
+      document.getElementById('main').innerHTML = `
+        <div class="card">
+          <div class="card-head"><h2>优惠券</h2></div>
+          <div class="form" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:16px">
+            <input id="cp-code" placeholder="券码 NEW10" />
+            <input id="cp-name" placeholder="名称" />
+            <select id="cp-type"><option value="0">固定立减</option><option value="1">百分比</option></select>
+            <input id="cp-discount" type="number" step="0.01" placeholder="减免/折扣" />
+            <input id="cp-min" type="number" step="0.01" placeholder="门槛金额" />
+            <input id="cp-limit" type="number" placeholder="发放总量 0=不限" />
+            <button class="btn btn-primary" onclick="AdminApp.createCoupon()">创建</button>
+          </div>
+          <table>
+            <thead><tr><th>券码</th><th>名称</th><th>类型</th><th>减免</th><th>门槛</th><th>已用/总量</th><th>状态</th></tr></thead>
+            <tbody>${rows.length ? rows.map(c => `<tr>
+              <td><code>${this.escapeHtml(c.code||'')}</code></td>
+              <td>${this.escapeHtml(c.name||'')}</td>
+              <td>${c.type===1?'折扣':'立减'}</td>
+              <td>${c.type===1?((c.discount||0)*100).toFixed(0)+'%':'¥'+(c.discount||0).toFixed(2)}</td>
+              <td>¥${(c.min_amount||0).toFixed(2)}</td>
+              <td>${c.used_count||0}/${c.total_limit||'∞'}</td>
+              <td>${c.status===1?'启用':'停用'}</td>
+            </tr>`).join('') : '<tr><td colspan="7">暂无优惠券</td></tr>'}</tbody>
+          </table>
+        </div>`;
+    });
+  },
+
+  async createCoupon() {
+    const body = {
+      code: document.getElementById('cp-code').value.trim(),
+      name: document.getElementById('cp-name').value.trim(),
+      type: parseInt(document.getElementById('cp-type').value, 10) || 0,
+      discount: parseFloat(document.getElementById('cp-discount').value) || 0,
+      min_amount: parseFloat(document.getElementById('cp-min').value) || 0,
+      total_limit: parseInt(document.getElementById('cp-limit').value, 10) || 0,
+      status: 1,
+    };
+    const j = await this.postJSON('/coupons', body);
+    if (j.code === 200) { this.toast('已创建', 'ok'); this.render_coupons(); }
+    else this.toast(j.msg || '创建失败', 'err');
   },
 
 // ---- 工具函数（AdminApp 方法，供模板字符串调用）----

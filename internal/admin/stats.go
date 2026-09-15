@@ -85,16 +85,9 @@ func (h *Handlers) HandleStatsPayments(c *gin.Context) {
 }
 
 func (h *Handlers) rangeStats(from, to time.Time) (int, float64) {
-	rows, err := h.Store.OrdersRange(from, to)
+	count, rev, err := h.Store.OrderSummaryRange(from, to)
 	if err != nil {
 		return 0, 0
-	}
-	count := len(rows)
-	var rev float64
-	for _, o := range rows {
-		if o.Status >= 1 {
-			rev += o.Amount
-		}
 	}
 	return count, rev
 }

@@ -17,8 +17,9 @@ import (
 
 // UserHandler 用户端处理器
 type UserHandler struct {
-	Store  *store.Store
-	Logger *slog.Logger
+	Store        *store.Store
+	Logger       *slog.Logger
+	CookieSecure bool
 }
 
 // RegisterRoutes 注册用户端路由
@@ -29,13 +30,15 @@ func (h *UserHandler) RegisterRoutes(g *gin.RouterGroup, require gin.HandlerFunc
 	g.GET("/user/profile", require, h.handleProfile)
 	g.GET("/user/orders", require, h.handleMyOrders)
 	g.GET("/user/balance/logs", require, h.handleBalanceLogs)
+	g.GET("/user/referral", require, h.handleReferral)
 }
 
 // 入口结构
 type registerReq struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Username   string `json:"username"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	InviteCode string `json:"invite_code"`
 }
 
 func (h *UserHandler) handleRegister(c *gin.Context) {
@@ -83,6 +86,11 @@ func (h *UserHandler) handleRegister(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}
+	// 绑定推荐人
+	if req.InviteCode != "" {
+		_, _ = h.Store.BindReferrer(u.ID, req.InviteCode)
+	}
+
 	// 登录态
 	if err := h.issueSession(c, u); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
@@ -155,7 +163,7 @@ func (h *UserHandler) handleLogout(c *gin.Context) {
 	if tok, _ := c.Cookie("user_session"); tok != "" {
 		_ = h.Store.DeleteSession(tok)
 	}
-	clearUserCookie(c)
+	h.clearUserCookie(c)
 	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "已退出"})
 }
 
@@ -204,6 +212,21 @@ func (h *UserHandler) handleBalanceLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "success", "data": logs})
 }
 
+func (h *UserHandler) handleReferral(c *gin.Context) {
+	uid, _ := c.Get("user_id")
+	userID := toInt64(uid)
+	if userID <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "未登录"})
+		return
+	}
+	stats, err := h.Store.GetUserReferralStats(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 200, "msg": "success", "data": stats})
+}
+
 // issueSession 颁发 cookie session
 func (h *UserHandler) issueSession(c *gin.Context, u *store.User) error {
 	tok, err := randomTokenHex(32)
@@ -216,17 +239,22 @@ func (h *UserHandler) issueSession(c *gin.Context, u *store.User) error {
 	}); err != nil {
 		return err
 	}
-	setUserCookie(c, tok, 7*24*3600)
+	h.setUserCookie(c, tok, 7*24*3600)
 	return nil
 }
 
-func setUserCookie(c *gin.Context, token string, maxAgeSec int) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("user_session", token, maxAgeSec, "/", "", false, true)
+func (h *UserHandler) setUserCookie(c *gin.Context, token string, maxAgeSec int) {
+	secure := h.CookieSecure
+	sameSite := http.SameSiteLaxMode
+	if secure {
+		sameSite = http.SameSiteStrictMode
+	}
+	c.SetSameSite(sameSite)
+	c.SetCookie("user_session", token, maxAgeSec, "/", "", secure, true)
 }
 
-func clearUserCookie(c *gin.Context) {
-	c.SetCookie("user_session", "", -1, "/", "", false, true)
+func (h *UserHandler) clearUserCookie(c *gin.Context) {
+	c.SetCookie("user_session", "", -1, "/", "", h.CookieSecure, true)
 }
 
 // 校验工具

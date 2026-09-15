@@ -29,11 +29,11 @@ func (h *Handlers) RegisterPoolRoutes(api *gin.RouterGroup, pool *PoolHandlers) 
 		// 批量上下架
 		g.POST("/status", pool.HandlePoolBatchStatus)
 		// 批量改价
-		g.POST("/price", pool.HandlePoolBatchPrice)
+		g.POST("/price", h.RequireTOTP(), pool.HandlePoolBatchPrice)
 		// 单条更新
 		g.PUT("/:id", pool.HandlePoolUpdate)
 		// 单条删除
-		g.DELETE("/:id", pool.HandlePoolDelete)
+		g.DELETE("/:id", h.RequireTOTP(), pool.HandlePoolDelete)
 		// 从上游同步
 		g.POST("/sync", pool.HandlePoolSync)
 		// 上游运行状态
@@ -214,8 +214,8 @@ func (p *PoolHandlers) HandlePoolSync(c *gin.Context) {
 		r.Categories = len(snap.Categories)
 		// 1) 落分类（如果有的话）
 		for _, cat := range snap.Categories {
-			// 直接用 categories 表存
-			_ = p.Store.CreateCategory(&store.Category{
+			// 直接用 categories 表存（去重 upsert）
+			_ = p.Store.UpsertCategory(&store.Category{
 				Name:   cat.Name,
 				Icon:   cat.Icon,
 				Sort:   int(cat.ID),

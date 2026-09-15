@@ -19,6 +19,7 @@ import (
 	"faka-gateway/internal/admin"
 	"faka-gateway/internal/api"
 	"faka-gateway/internal/config"
+	"faka-gateway/internal/crypto"
 	"faka-gateway/internal/store"
 	"faka-gateway/internal/upstream"
 	"faka-gateway/internal/upstream/downstreamb"
@@ -56,7 +57,7 @@ func main() {
 	logger := newLogger(cfg)
 	slog.SetDefault(logger)
 
-	slog.Info("faka-gateway starting",
+	slog.Info("vaultlane starting",
 		"listen", cfg.Server.Listen,
 		"upstreams", len(cfg.Upstreams),
 	)
@@ -113,6 +114,15 @@ func main() {
 		os.Exit(1)
 	}
 	defer ordStore.Close()
+	// 卡密 AES-256-GCM 加密（从 session_secret 派生）
+	ordStore.Cipher = crypto.NewFromSecret(cfg.Admin.SessionSecret)
+
+	// 后台上游自动同步与价格熔断器
+	syncer := upstream.NewSyncer(mgr, ordStore, cfg, logger)
+	if cfg.Modules.UpstreamSync {
+		syncer.Start(15 * time.Minute)
+		defer syncer.Stop()
+	}
 
 	// Gin
 	gin.SetMode(cfg.Server.Mode)

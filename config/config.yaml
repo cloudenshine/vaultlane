@@ -1,3 +1,7 @@
+# Vaultlane (码仓) runtime configuration.
+# Fill admin.password_hash and admin.session_secret before starting.
+# Never commit real secrets. See SECURITY.md.
+
 server:
   listen: "127.0.0.1:8090"
   mode: "release"            # debug | release | test
@@ -14,7 +18,7 @@ upstream:
   app_key: "YOUR_APP_KEY"                       # 上游分配的 app_key
   timeout: 15
   retry_max: 2
-  user_agent: "FakaGateway/1.0"
+  user_agent: "Vaultlane/5.0"
 
 cache:
   category_ttl: 300         # 分类缓存 5 分钟

@@ -169,7 +169,7 @@ func Load(path string) (*Config, error) {
 		c.Server.Mode = "release"
 	}
 	if c.Upstream.UserAgent == "" {
-		c.Upstream.UserAgent = "FakaGateway/1.0"
+		c.Upstream.UserAgent = "Vaultlane/5.0"
 	}
 	if c.Cache.MaxEntries == 0 {
 		c.Cache.MaxEntries = 512
@@ -178,7 +178,7 @@ func Load(path string) (*Config, error) {
 		c.DownstreamB.BaseURL = "https://downstream-api.example.com"
 	}
 	if c.DownstreamB.UserAgent == "" {
-		c.DownstreamB.UserAgent = "FakaGateway/2.0"
+		c.DownstreamB.UserAgent = "Vaultlane/5.0"
 	}
 	if c.DownstreamB.Timeout == 0 {
 		c.DownstreamB.Timeout = 20
