@@ -4,8 +4,8 @@ message: If you use this software, please cite it as below.
 type: software
 authors:
   - name: Vaultlane contributors
-repository-code: https://github.com/cloudenshine/faka-gateway
-url: https://github.com/cloudenshine/faka-gateway
+repository-code: https://github.com/cloudenshine/vaultlane
+url: https://github.com/cloudenshine/vaultlane
 abstract: >-
   Self-hosted digital-goods commerce gateway. Aggregates
   upstream catalogs into a local pool, applies operator

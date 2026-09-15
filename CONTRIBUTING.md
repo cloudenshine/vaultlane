@@ -16,7 +16,7 @@ Requirements:
 - Git
 
 ```bash
-git clone https://github.com/<owner>/vaultlane.git
+git clone https://github.com/cloudenshine/vaultlane.git
 cd vaultlane
 cp config/config.yaml config/config.local.yaml   # optional local copy
 go test ./...

@@ -42,7 +42,7 @@ After the first push of this tree:
 1. **About**: Description = `Self-hosted digital-goods commerce gateway (码仓)`. Topics = `golang`, `ecommerce`, `payment`, `sqlite`, `self-hosted`.
 2. **General**: Enable Issues, Discussions (optional), and “Automatically delete head branches”.
 3. **Security**: Enable Dependabot alerts + GitHub Advisory reports (matches `SECURITY.md`).
-4. Optional: rename the GitHub repo from `faka-gateway` to `vaultlane`. Keep the Go module path `faka-gateway` until a dedicated major bump.
+4. Repository is already named `vaultlane`. Keep the Go module path `faka-gateway` until a dedicated major bump.
 
 ## Community health files
 

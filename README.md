@@ -1,6 +1,6 @@
 # Vaultlane · 码仓
 
-[![CI](https://github.com/cloudenshine/faka-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudenshine/faka-gateway/actions/workflows/ci.yml)
+[![CI](https://github.com/cloudenshine/vaultlane/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudenshine/vaultlane/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-1F3A5F.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
 
@@ -52,7 +52,7 @@ Most card shops either proxy a single supplier (the storefront dies when the sup
 **Requirements:** Go 1.25+
 
 ```bash
-git clone https://github.com/cloudenshine/faka-gateway.git
+git clone https://github.com/cloudenshine/vaultlane.git
 cd faka-gateway
 
 # 1. Admin credentials (required — process refuses defaults)
