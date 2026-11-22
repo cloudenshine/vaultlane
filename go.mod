@@ -3,7 +3,7 @@ module faka-gateway
 go 1.26.10
 
 require (
-	github.com/gin-contrib/cors v1.7.10
+	github.com/gin-contrib/cors v1.7.11
 	github.com/gin-gonic/gin v1.12.0
 	github.com/joho/godotenv v1.5.1
 	golang.org/x/crypto v0.59.0
